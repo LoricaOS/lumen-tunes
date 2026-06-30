@@ -1,26 +1,26 @@
 # lumen-tunes
 
-The music player for **AspisOS**, a capability-based, no-ambient-authority
+The music player for **LoricaOS**, a capability-based, no-ambient-authority
 operating system built on the from-scratch
-[Aegis](https://github.com/AspisOS/Aegis) kernel.
+[Aegis](https://github.com/LoricaOS/Aegis) kernel.
 
 lumen-tunes is a minimal WAV/MP3 player that streams audio to `/dev/audio`. It
-is an external client of the [lumen](https://github.com/AspisOS/lumen)
-compositor, distributed as a [herald](https://github.com/AspisOS/AspisOS)
+is an external client of the [lumen](https://github.com/LoricaOS/lumen)
+compositor, distributed as a [herald](https://github.com/LoricaOS/LoricaOS)
 package and installed as an `/apps` bundle. Its descriptor's display name is
 **Tunes**.
 
-## The AspisOS ecosystem
+## The LoricaOS ecosystem
 
-AspisOS is decomposed into independent repositories; lumen-tunes is one
+LoricaOS is decomposed into independent repositories; lumen-tunes is one
 graphical leaf of that tree:
 
 | Repo | Role |
 |------|------|
-| [`AspisOS/Aegis`](https://github.com/AspisOS/Aegis) | The kernel. Provides the capability model, the `/dev/audio` device, the streaming-with-backpressure write path, and the `SYS_AUDIO_STOP` syscall that halts DMA. |
-| [`AspisOS/lumen`](https://github.com/AspisOS/lumen) | The compositor / display server. lumen-tunes connects to its socket for a window and input events. |
-| [`AspisOS/glyph`](https://github.com/AspisOS/glyph) | The GUI toolkit. Supplies the renderer, the theme, the client side of lumen's window protocol (`lumen_client.h`), **and `libaudio`** — the decode/stream library that drives playback. |
-| [`AspisOS/AspisOS`](https://github.com/AspisOS/AspisOS) | The OS: userland, rootfs, ISO/installer, and the herald package manager that installs this `.hpkg`. |
+| [`LoricaOS/Aegis`](https://github.com/LoricaOS/Aegis) | The kernel. Provides the capability model, the `/dev/audio` device, the streaming-with-backpressure write path, and the `SYS_AUDIO_STOP` syscall that halts DMA. |
+| [`LoricaOS/lumen`](https://github.com/LoricaOS/lumen) | The compositor / display server. lumen-tunes connects to its socket for a window and input events. |
+| [`LoricaOS/glyph`](https://github.com/LoricaOS/glyph) | The GUI toolkit. Supplies the renderer, the theme, the client side of lumen's window protocol (`lumen_client.h`), **and `libaudio`** — the decode/stream library that drives playback. |
+| [`LoricaOS/LoricaOS`](https://github.com/LoricaOS/LoricaOS) | The OS: userland, rootfs, ISO/installer, and the herald package manager that installs this `.hpkg`. |
 
 ## What it does
 
@@ -39,14 +39,14 @@ Grounded in `src/main.c`:
   on its own, updating the status line ("Stopped" vs "Finished"). On quit it
   stops playback so audio never outlives the window.
 - **Launch on a file.** The file to play is `argv[1]`: the
-  [file manager](https://github.com/AspisOS/lumen-filemanager) spawns Tunes on a
+  [file manager](https://github.com/LoricaOS/lumen-filemanager) spawns Tunes on a
   `.wav`/`.mp3` and it auto-plays. Launched with no argument it shows a "No
   file" prompt.
 - **Keys.** Space/Enter play, S/Esc stop, Q/close quit — or click the buttons.
 
 ## Capabilities
 
-AspisOS has no ambient authority: a process can do nothing except through
+LoricaOS has no ambient authority: a process can do nothing except through
 capabilities granted at exec time. lumen-tunes's policy
 (`pkg/etc/aegis/caps.d/tunes`) is the baseline desktop-app profile:
 
@@ -65,7 +65,7 @@ signature-trusted, installed verbatim by herald.
 
 ## Building
 
-lumen-tunes fetches a pinned [glyph](https://github.com/AspisOS/glyph) toolkit
+lumen-tunes fetches a pinned [glyph](https://github.com/LoricaOS/glyph) toolkit
 artifact (the GUI libraries it links, including **libaudio** for playback) and
 builds against it, then packs a signed herald package. The shared Makefile links
 the full toolkit (`-lcitadel -laudio -lauth -lglyph`); a static archive only
@@ -109,7 +109,7 @@ GLYPH_VERSION   the pinned glyph toolkit version it builds against
 ## Dependencies
 
 `depends=lumen` — lumen-tunes is a Lumen client, so installing it pulls
-[lumen](https://github.com/AspisOS/lumen) (which in turn ships the desktop fonts
+[lumen](https://github.com/LoricaOS/lumen) (which in turn ships the desktop fonts
 every dependent inherits). The audio decode/stream library, **libaudio**, comes
 from the pinned glyph toolkit fetched at build time, not as a runtime herald
 dependency.
