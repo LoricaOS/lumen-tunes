@@ -26,8 +26,10 @@ graphical leaf of that tree:
 
 Grounded in `src/main.c`:
 
-- **One window.** Connects to lumen and draws a single 420×214 window with a
-  track title, a progress bar with elapsed/total time, and Play / Stop buttons.
+- **One window.** Connects to lumen and draws a single 460×250 player card: a
+  vinyl-record album-art tile on the left, and on the right the track title,
+  format, a seek bar with elapsed/total time, and round transport buttons
+  (restart + a play/stop toggle).
 - **Playback via libaudio.** Audio goes through `/dev/audio` using the toolkit's
   **libaudio**, which streams with backpressure so a track of any length plays.
   The decode/produce side runs in a forked child (`audio_play_file_async`) so
@@ -38,11 +40,14 @@ Grounded in `src/main.c`:
   drain tail. A `SIGCHLD` distinguishes a user stop from a track that finished
   on its own, updating the status line ("Stopped" vs "Finished"). On quit it
   stops playback so audio never outlives the window.
+- **Restart.** libaudio has no seek, so the restart button (and `R`) replays
+  from the top — it stops any running playback and starts a fresh child from 0.
 - **Launch on a file.** The file to play is `argv[1]`: the
   [file manager](https://github.com/LoricaOS/lumen-filemanager) spawns Tunes on a
   `.wav`/`.mp3` and it auto-plays. Launched with no argument it shows a "No
-  file" prompt.
-- **Keys.** Space/Enter play, S/Esc stop, Q/close quit — or click the buttons.
+  track loaded" prompt.
+- **Keys.** Space/Enter play-pause toggle, S/Esc stop, R restart, Q/close quit —
+  or click the round transport buttons.
 
 ## Capabilities
 

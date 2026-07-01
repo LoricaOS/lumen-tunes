@@ -6,11 +6,13 @@
  * (audio_play_file_async) so the window stays responsive; Stop kills it. A
  * SIGCHLD tells us when the track finishes on its own.
  *
- * Keys: Space/Enter play, S/Esc stop, Q/close quit. Or click the buttons.
+ * Keys: Space/Enter play-pause toggle, S/Esc stop, R restart, Q/close quit.
+ * Or click the round transport buttons.
  */
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <signal.h>
 #include <stdint.h>
@@ -25,19 +27,26 @@
 
 #define SYS_AUDIO_STOP 504
 
-#define WIN_W   420
-#define WIN_H   214
+#define WIN_W   460
+#define WIN_H   250
 
-#define PROG_X  30
-#define PROG_Y  54
-#define PROG_W  (WIN_W - 2 * PROG_X)
-#define PROG_H  6
+/* Album-art card on the left; a text + transport column on the right. */
+#define ART     170
+#define ART_X   28
+#define ART_Y   ((WIN_H - ART) / 2)          /* 40 */
+#define RX      (ART_X + ART + 28)           /* right column x, 226 */
+#define COLW    (WIN_W - RX - 28)            /* right column width, 206 */
 
-#define BTN_W   150
-#define BTN_H   48
-#define PLAY_X  40
-#define STOP_X  (PLAY_X + BTN_W + 40)
-#define BTN_Y   100
+#define TITLE_PX 20
+#define SEEK_Y   124
+#define SEEK_H   6
+
+/* Round transport buttons, centered in the right column. */
+#define TB_CY    192
+#define PLAY_CX  (RX + COLW / 2)
+#define PLAY_R   26
+#define RST_CX   (PLAY_CX - (PLAY_R + 16 + 17))
+#define RST_R    17
 
 enum { ST_READY, ST_PLAYING, ST_STOPPED, ST_DONE, ST_NOFILE };
 
@@ -90,13 +99,77 @@ static void basename_of(const char *p, char *out, int n)
 
 /* ── Rendering ────────────────────────────────────────────────────────────── */
 
-static void button(int x, int y, const char *label, uint32_t bg, int enabled)
+static int at_least(int v, int min) { return v < min ? min : v; }
+
+/* Larger UI text via the TTF font when available, else the bitmap UI font. */
+static void text_px(int x, int y, const char *str, uint32_t col, int px)
+{
+    if (g_font_ui)
+        font_draw_text(&g_t.surf, g_font_ui, px, x, y, str, col);
+    else
+        draw_text_ui(&g_t.surf, x, y, str, col);
+}
+static int text_px_w(const char *str, int px)
+{
+    return g_font_ui ? font_text_width(g_font_ui, px, str) : glyph_text_width(str);
+}
+
+/* Trim in place until it fits maxw at the given size. */
+static void fit(char *buf, int px, int maxw)
+{
+    while (buf[0] && text_px_w(buf, px) > maxw)
+        buf[strlen(buf) - 1] = '\0';
+}
+
+static const char *format_label(const char *name)
+{
+    const char *dot = strrchr(name, '.');
+    if (dot) {
+        if (!strcasecmp(dot, ".mp3")) return "MP3 audio";
+        if (!strcasecmp(dot, ".wav")) return "WAV audio";
+    }
+    return "Audio";
+}
+
+/* Transport glyphs, centered on (cx,cy). */
+static void glyph_play(int cx, int cy, int h, uint32_t col)
+{
+    int half = h / 2, leftX = cx - h / 3, i;
+    for (i = 0; i < h; i++) {
+        int a = i - half, w = half - (a < 0 ? -a : a);
+        draw_fill_rect(&g_t.surf, leftX, cy - half + i, at_least(w, 1), 1, col);
+    }
+}
+static void glyph_stop(int cx, int cy, int sz, uint32_t col)
+{
+    draw_fill_rect(&g_t.surf, cx - sz / 2, cy - sz / 2, sz, sz, col);
+}
+static void glyph_restart(int cx, int cy, int h, uint32_t col)
+{
+    int half = h / 2, bar = at_least(h / 6, 2);
+    int lx = cx - half + bar + 1, i;
+    draw_fill_rect(&g_t.surf, cx - half, cy - half, bar, h, col);   /* |◀ bar */
+    for (i = 0; i < h; i++) {                                       /* apex left */
+        int a = i - half, w = half - (a < 0 ? -a : a);
+        w = at_least(w, 1);
+        draw_fill_rect(&g_t.surf, lx + (half - w), cy - half + i, w, 1, col);
+    }
+}
+
+/* A vinyl record as album art — dark disc, grooves, accent center label. */
+static void draw_album_art(int playing)
 {
     surface_t *s = &g_t.surf;
-    draw_rounded_rect(s, x, y, BTN_W, BTN_H, 8, enabled ? bg : THEME_SURFACE_2);
-    int tw = glyph_text_width(label);
-    draw_text_ui(s, x + (BTN_W - tw) / 2, y + (BTN_H - glyph_text_height()) / 2,
-                 label, enabled ? THEME_TEXT : THEME_TEXT_DIM);
+    int cx = ART_X + ART / 2, cy = ART_Y + ART / 2;
+    int R = ART / 2 - 16, gr;
+
+    draw_rounded_rect(s, ART_X, ART_Y, ART, ART, 14, THEME_SURFACE_2);
+    draw_circle_filled(s, cx, cy, R, 0x00151519);          /* the record */
+    for (gr = R - 8; gr > R / 3; gr -= 8)                  /* grooves */
+        draw_circle(s, cx, cy, gr, 0x0026262E);
+    draw_circle_filled(s, cx, cy, R / 3,
+                       playing ? THEME_ACCENT : 0x003A3A44); /* label */
+    draw_circle_filled(s, cx, cy, at_least(R / 16, 2), 0x00151519); /* spindle */
 }
 
 static void render(void)
@@ -104,48 +177,67 @@ static void render(void)
     if (!g_t.dirty) return;
     g_t.dirty = 0;
     surface_t *s = &g_t.surf;
-
-    draw_fill_rect(s, 0, 0, g_t.w, g_t.h, THEME_SURFACE);
-
-    const char *title = g_t.has_file ? g_t.name : "No file — open a .wav or .mp3";
-    int tw = glyph_text_width(title);
-    draw_text_ui(s, (g_t.w - tw) / 2, 22, title,
-                 g_t.has_file ? THEME_TEXT : THEME_TEXT_DIM);
-
     int playing = (g_t.status == ST_PLAYING);
 
-    /* Progress bar + elapsed/total time (when a file is loaded). */
-    if (g_t.has_file) {
-        int elapsed = playing ? (int)(now_ms() - g_t.start_ms) : 0;
-        if (g_t.status == ST_DONE) elapsed = g_t.dur_ms;
-        if (g_t.dur_ms > 0 && elapsed > g_t.dur_ms) elapsed = g_t.dur_ms;
+    draw_gradient_v(s, 0, 0, g_t.w, g_t.h, THEME_SURFACE_2, THEME_SURFACE);
+    draw_album_art(playing);
 
-        draw_rounded_rect(s, PROG_X, PROG_Y, PROG_W, PROG_H, PROG_H / 2, THEME_SURFACE_2);
-        if (g_t.dur_ms > 0) {
-            int fillw = (int)((long long)PROG_W * elapsed / g_t.dur_ms);
-            if (fillw > 0)
-                draw_rounded_rect(s, PROG_X, PROG_Y, fillw, PROG_H, PROG_H / 2, THEME_ACCENT);
-        }
-        char te[12], tt[12], line[32];
-        fmt_time(elapsed, te, sizeof(te));
-        fmt_time(g_t.dur_ms, tt, sizeof(tt));
-        snprintf(line, sizeof(line), g_t.dur_ms > 0 ? "%s / %s" : "%s", te, tt);
-        draw_text_ui(s, PROG_X, PROG_Y + PROG_H + 6, line, THEME_TEXT_DIM);
+    /* Title + subtitle. */
+    char title[160];
+    snprintf(title, sizeof(title), "%s", g_t.has_file ? g_t.name : "No track loaded");
+    fit(title, TITLE_PX, COLW);
+    text_px(RX, 52, title, g_t.has_file ? THEME_TEXT : THEME_TEXT_DIM, TITLE_PX);
+
+    /* Subtitle: just the format (the duration already sits at the seek end). */
+    const char *sub = g_t.has_file ? format_label(g_t.name)
+                                   : "Open a .wav or .mp3";
+    draw_text_ui(s, RX, 84, sub, THEME_TEXT_DIM);
+
+    /* Seek bar with elapsed / total at the ends. */
+    int elapsed = playing ? (int)(now_ms() - g_t.start_ms) : 0;
+    if (g_t.status == ST_DONE) elapsed = g_t.dur_ms;
+    if (g_t.dur_ms > 0 && elapsed > g_t.dur_ms) elapsed = g_t.dur_ms;
+
+    draw_rounded_rect(s, RX, SEEK_Y, COLW, SEEK_H, SEEK_H / 2, THEME_SURFACE_2);
+    if (g_t.has_file && g_t.dur_ms > 0) {
+        int fillw = (int)((long long)COLW * elapsed / g_t.dur_ms);
+        if (fillw > 0)
+            draw_rounded_rect(s, RX, SEEK_Y, fillw, SEEK_H, SEEK_H / 2, THEME_ACCENT);
+        if (playing)   /* seek knob */
+            draw_circle_filled(s, RX + fillw, SEEK_Y + SEEK_H / 2, 5, THEME_ACCENT);
     }
+    char te[12], tt[12];
+    fmt_time(g_t.has_file ? elapsed : 0, te, sizeof(te));
+    fmt_time(g_t.has_file ? g_t.dur_ms : 0, tt, sizeof(tt));
+    draw_text_ui(s, RX, SEEK_Y + SEEK_H + 8, te, THEME_TEXT_DIM);
+    draw_text_ui(s, RX + COLW - glyph_text_width(tt), SEEK_Y + SEEK_H + 8, tt,
+                 THEME_TEXT_DIM);
 
-    button(PLAY_X, BTN_Y, playing ? "Playing" : "Play",
-           THEME_ACCENT, g_t.has_file && !playing);
-    button(STOP_X, BTN_Y, "Stop", THEME_SURFACE_2, playing);
+    /* Transport: restart + big play/stop toggle. */
+    uint32_t rst_fg = g_t.has_file ? THEME_TEXT : THEME_TEXT_DIM;
+    draw_circle_filled(s, RST_CX, TB_CY, RST_R, THEME_SURFACE_2);
+    glyph_restart(RST_CX, TB_CY, RST_R, rst_fg);
 
+    draw_circle_filled(s, PLAY_CX, TB_CY, PLAY_R,
+                       g_t.has_file ? THEME_ACCENT : THEME_SURFACE_2);
+    uint32_t play_fg = g_t.has_file ? THEME_TEXT_ON_ACCENT : THEME_TEXT_DIM;
+    if (playing)
+        glyph_stop(PLAY_CX, TB_CY, PLAY_R - 6, play_fg);
+    else
+        glyph_play(PLAY_CX, TB_CY, PLAY_R - 4, play_fg);
+
+    /* A small status line only when there's something worth saying. */
     const char *st =
-        g_t.status == ST_PLAYING ? "Playing…" :
         g_t.status == ST_STOPPED ? "Stopped" :
         g_t.status == ST_DONE    ? "Finished" :
-        g_t.status == ST_NOFILE  ? "Nothing to play" : "Ready";
-    int sw = glyph_text_width(st);
-    draw_text_ui(s, (g_t.w - sw) / 2, BTN_Y + BTN_H + 26, st, THEME_TEXT_DIM);
+        g_t.status == ST_NOFILE  ? "Nothing to play" : NULL;
+    if (st) {
+        int sw = glyph_text_width(st);
+        draw_text_ui(s, PLAY_CX - sw / 2, TB_CY + PLAY_R + 12, st, THEME_TEXT_DIM);
+    }
 
-    lumen_window_present(g_t.lwin);
+    if (g_t.lwin)
+        lumen_window_present(g_t.lwin);
 }
 
 /* ── Actions ──────────────────────────────────────────────────────────────── */
@@ -172,9 +264,34 @@ static void do_stop(void)
     dprintf(2, "[TUNES] stop pid=%d\n", (int)g_t.pid);
 }
 
-static int in_btn(int mx, int my, int bx)
+/* Replay from the top. libaudio has no seek, so restart == stop + play from 0.
+ * Reap the old child synchronously and clear its pending SIGCHLD so the main
+ * loop's reaper doesn't mistake it for the new playback ending. */
+static void do_restart(void)
 {
-    return mx >= bx && mx < bx + BTN_W && my >= BTN_Y && my < BTN_Y + BTN_H;
+    if (!g_t.has_file) return;
+    if (g_t.pid > 0) {
+        kill(g_t.pid, SIGKILL);
+        syscall(SYS_AUDIO_STOP);
+        waitpid(g_t.pid, NULL, 0);
+        g_t.pid = 0;
+    }
+    s_child = 0; s_stopping = 0;
+    g_t.status = ST_STOPPED;
+    do_play();
+}
+
+/* Play/stop toggle on the big transport button. */
+static void do_toggle(void)
+{
+    if (g_t.status == ST_PLAYING) do_stop();
+    else                          do_play();
+}
+
+static int in_circle(int mx, int my, int cx, int cy, int r)
+{
+    int dx = mx - cx, dy = my - cy;
+    return dx * dx + dy * dy <= r * r;
 }
 
 /* Returns 0 to quit, 1 to keep running. */
@@ -182,9 +299,10 @@ static int handle_key(uint8_t k)
 {
     switch (k) {
     case 'q': case 'Q':            return 0;
-    case 0x1B:                     do_stop(); return 1;   /* Esc */
-    case ' ': case '\r': case '\n': do_play(); return 1;
-    case 's': case 'S':            do_stop(); return 1;
+    case 0x1B:                     do_stop();    return 1;   /* Esc */
+    case ' ': case '\r': case '\n': do_toggle(); return 1;
+    case 's': case 'S':            do_stop();    return 1;
+    case 'r': case 'R':            do_restart(); return 1;
     default:                       return 1;
     }
 }
@@ -195,6 +313,7 @@ int main(int argc, char **argv)
         snprintf(g_t.path, sizeof(g_t.path), "%s", argv[1]);
         basename_of(g_t.path, g_t.name, sizeof(g_t.name));
         g_t.has_file = 1;
+        g_t.dur_ms = audio_duration_ms(g_t.path);   /* show total before play */
         g_t.status = ST_READY;
     } else {
         g_t.status = ST_NOFILE;
@@ -245,8 +364,10 @@ int main(int argc, char **argv)
                 if (!handle_key((uint8_t)ev.key.keycode)) break;
             } else if (ev.type == LUMEN_EV_MOUSE &&
                        ev.mouse.evtype == LUMEN_MOUSE_DOWN && (ev.mouse.buttons & 1)) {
-                if (in_btn(ev.mouse.x, ev.mouse.y, PLAY_X)) do_play();
-                else if (in_btn(ev.mouse.x, ev.mouse.y, STOP_X)) do_stop();
+                if (in_circle(ev.mouse.x, ev.mouse.y, PLAY_CX, TB_CY, PLAY_R))
+                    do_toggle();
+                else if (in_circle(ev.mouse.x, ev.mouse.y, RST_CX, TB_CY, RST_R))
+                    do_restart();
             }
         }
         if (g_t.status == ST_PLAYING)
