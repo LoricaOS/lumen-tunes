@@ -163,7 +163,7 @@ static void draw_album_art(int playing)
     int cx = ART_X + ART / 2, cy = ART_Y + ART / 2;
     int R = ART / 2 - 16, gr;
 
-    draw_rounded_rect(s, ART_X, ART_Y, ART, ART, 14, THEME_SURFACE_2);
+    draw_rounded_rect(s, ART_X, ART_Y, ART, ART, R_LG, THEME_SURFACE_2);
     draw_circle_filled(s, cx, cy, R, 0x00151519);          /* the record */
     for (gr = R - 8; gr > R / 3; gr -= 8)                  /* grooves */
         draw_circle(s, cx, cy, gr, 0x0026262E);
