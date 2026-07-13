@@ -294,6 +294,33 @@ static int in_circle(int mx, int my, int cx, int cy, int r)
     return dx * dx + dy * dy <= r * r;
 }
 
+/* ── Top-bar menu ─────────────────────────────────────────────────────────── */
+
+enum { CMD_PLAYPAUSE = 1, CMD_STOP, CMD_RESTART, CMD_CLOSE };
+
+static void publish_menu(void)
+{
+    lumen_set_menu_t m;
+    glyph_menu_reset(&m, g_t.lwin->id);
+    int p = glyph_menu_add_col(&m, "Playback");
+    glyph_menu_add_item(&m, p, "Play/Pause", CMD_PLAYPAUSE);
+    glyph_menu_add_item(&m, p, "Stop", CMD_STOP);
+    glyph_menu_add_item(&m, p, "Restart", CMD_RESTART);
+    int f = glyph_menu_add_col(&m, "File");
+    glyph_menu_add_item(&m, f, "Close", CMD_CLOSE);
+    lumen_window_set_menu(g_t.lwin, &m);
+}
+
+static void menu_invoke(uint32_t cmd)
+{
+    switch (cmd) {
+    case CMD_PLAYPAUSE: do_toggle();  break;
+    case CMD_STOP:      do_stop();    break;
+    case CMD_RESTART:   do_restart(); break;
+    case CMD_CLOSE:     s_term = 1;   break;
+    }
+}
+
 /* Returns 0 to quit, 1 to keep running. */
 static int handle_key(uint8_t k)
 {
@@ -329,6 +356,7 @@ int main(int argc, char **argv)
                             .w = g_t.w, .h = g_t.h, .pitch = g_t.lwin->stride };
 
     font_init();
+    publish_menu();
     dprintf(2, "[TUNES] connected %dx%d file=%s\n",
             g_t.w, g_t.h, g_t.has_file ? g_t.name : "(none)");
 
@@ -360,7 +388,9 @@ int main(int argc, char **argv)
         if (r < 0) break;
         if (r == 1) {
             if (ev.type == LUMEN_EV_CLOSE_REQUEST) break;
-            else if (ev.type == LUMEN_EV_KEY && ev.key.pressed) {
+            else if (ev.type == LUMEN_EV_MENU_INVOKE) {
+                menu_invoke(ev.menu.command);
+            } else if (ev.type == LUMEN_EV_KEY && ev.key.pressed) {
                 if (!handle_key((uint8_t)ev.key.keycode)) break;
             } else if (ev.type == LUMEN_EV_MOUSE &&
                        ev.mouse.evtype == LUMEN_MOUSE_DOWN && (ev.mouse.buttons & 1)) {
